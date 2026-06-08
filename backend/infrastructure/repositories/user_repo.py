@@ -1,18 +1,25 @@
-from datetime import datetime, timezone
+from typing import Optional
+from datetime import datetime
 
-from infrastructure.db.collection import users_collection
+from motor.motor_asyncio import AsyncIOMotorCollection
 
-
-async def create_user(user_id: str, name: str, email: str, hashed_password: str) -> None:
-    await users_collection().insert_one({
-        "_id": user_id,
-        "name": name,
-        "email": email,
-        "hashed_password": hashed_password,
-        "created_at": datetime.now(timezone.utc),
-        "last_login": None,
-    })
+from .abstractions.user_repo import AbstractUserRepo
 
 
-async def find_by_email(email: str) -> dict | None:
-    return await users_collection().find_one({"email": email})
+class MongoUserRepo(AbstractUserRepo):
+    def __init__(self, col: AsyncIOMotorCollection):
+        self.col = col
+
+    async def create_user(self, user_id: str, name: str, email: str, hashed_password: str) -> dict:
+        doc = {
+            "_id": user_id,
+            "name": name,
+            "email": email,
+            "hashed_password": hashed_password,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        await self.col.insert_one(doc)
+        return doc
+
+    async def find_by_email(self, email: str) -> Optional[dict]:
+        return await self.col.find_one({"email": email})
