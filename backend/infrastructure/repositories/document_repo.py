@@ -45,3 +45,10 @@ class Neo4jDocumentRepo(AbstractDocumentRepo):
             OPTIONAL MATCH (d)-[:CONTAINS]->(c:Concept)
             DETACH DELETE d, c
         """, user_id=user_id, id=doc_id)
+
+    async def get_document_for_concept(self, concept_id: str, user_id: str) -> list[dict]:
+        result = await self.session.run("""
+            MATCH (d:Document {user_id: $user_id})-[:CONTAINS]->(c:Concept {id: $concept_id})
+            RETURN d
+        """, concept_id=concept_id, user_id=user_id)
+        return [dict(record["d"]) async for record in result]

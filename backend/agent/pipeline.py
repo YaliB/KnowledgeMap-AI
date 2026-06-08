@@ -43,16 +43,17 @@ async def run_extraction_pipeline(document_id: str, user_id: str, file_path: str
         raw_concepts = [{**c.model_dump(), "subject": subject} for c in state["concepts"]]
         saved_concepts = await save_concepts_from_extractor_agent(document_id, user_id, raw_concepts)
 
-        await _relationship_graph.ainvoke({
-            "document_id": document_id,
-            "user_id": user_id,
-            "concepts": saved_concepts,
-            "relationships": [],
-            "candidate_pairs": [],
-            "current_index": 0,
-            "error": None,
-            "status": "processing",
-        })
+        if saved_concepts:
+            await _relationship_graph.ainvoke({
+                "document_id": document_id,
+                "user_id": user_id,
+                "concepts": saved_concepts,
+                "relationships": [],
+                "candidate_pairs": [],
+                "current_index": 0,
+                "error": None,
+                "status": "processing",
+            })
 
         async with get_session() as session:
             doc_repo = Neo4jDocumentRepo(session)

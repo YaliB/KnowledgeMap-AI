@@ -10,6 +10,7 @@ from infrastructure.db import mongo, neo4j
 async def lifespan(app: FastAPI):
     mongo.init_client(settings.mongodb_uri)
     await neo4j.connect()
+    await neo4j.run_constraints()
 
     yield
 

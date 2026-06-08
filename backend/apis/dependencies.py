@@ -11,7 +11,8 @@ from infrastructure.repositories.abstractions.user_repo import AbstractUserRepo
 from infrastructure.repositories.abstractions.session_repo import AbstractSessionRepo
 from infrastructure.repositories.abstractions.document_repo import AbstractDocumentRepo
 from infrastructure.repositories.abstractions.concept_repo import AbstractConceptRepo
-from services.pdf_service import AbstractPDFService, PyPDFService
+from core.config import settings
+from services.pdf_service import AbstractPDFService, S3PDFService, PyPDFService
 from services.document_service import AbstractDocumentService, DocumentService
 
 
@@ -38,7 +39,7 @@ async def get_concept_repo() -> AbstractConceptRepo:
 # --- Service providers ---
 
 def get_pdf_service() -> AbstractPDFService:
-    return PyPDFService()
+    return S3PDFService() if settings.use_s3 else PyPDFService()
 
 
 def get_document_service(

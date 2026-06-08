@@ -1,4 +1,3 @@
-import json
 import logging
 from datetime import datetime, UTC
 from uuid import uuid4
@@ -8,11 +7,12 @@ from langchain_core.messages import HumanMessage
 
 from core.config import settings
 from agent.extractor.state import ExtractorState
-from schemas.concept import ConceptExtracted
+from schemas.concept import ConceptList
 
 logger = logging.getLogger(__name__)
 
 _llm = ChatOpenAI(model="gpt-4o", temperature=0.2, openai_api_key=settings.openai_api_key)
+_llm_structured = _llm.with_structured_output(ConceptList)
 _embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=settings.openai_api_key)
 
 
@@ -24,22 +24,14 @@ async def read_pdf_node(state: ExtractorState) -> dict:
 async def extract_concepts_node(state: ExtractorState) -> dict:
     prompt = f"""You are an expert knowledge extractor. Given the following text chunks from a document about {state['subject']}, extract the key concepts a student needs to understand.
 
-Return ONLY a valid JSON array. No preamble, no markdown, no explanation.
-
-Each item must have exactly these fields:
-- name: string, title case, max 60 characters
-- definition: string, 1-2 plain English sentences
-- importance: float between 1.0 and 10.0
-- tags: array of 2-5 lowercase keyword strings
+For each concept provide: name (title case, max 60 chars), definition (1-2 plain English sentences), importance (float 1.0-10.0), tags (2-5 lowercase keywords).
 
 Text chunks:
 {state['raw_chunks']}
 """
     try:
-        response = await _llm.ainvoke([HumanMessage(content=prompt)])
-        raw = response.content
-        parsed_concepts = [ConceptExtracted(**item) for item in json.loads(raw)]
-        return {"concepts": parsed_concepts}
+        result: ConceptList = await _llm_structured.ainvoke([HumanMessage(content=prompt)])
+        return {"concepts": result.concepts}
     except Exception as e:
         logger.exception("extract_concepts_node failed")
         return {"error": str(e), "concepts": []}

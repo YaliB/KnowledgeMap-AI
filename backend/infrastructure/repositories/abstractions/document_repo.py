@@ -17,3 +17,6 @@ class AbstractDocumentRepo(ABC):
 
     @abstractmethod
     async def delete_document_and_concepts(self, user_id: str, doc_id: str) -> None: ...
+
+    @abstractmethod
+    async def get_document_for_concept(self, concept_id: str, user_id: str) -> list[dict]: ...

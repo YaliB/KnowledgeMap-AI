@@ -75,11 +75,12 @@ class Neo4jConceptRepo(AbstractConceptRepo):
             YIELD node, score
             WHERE node.user_id = $user_id
               AND score > 0.75
-            RETURN node, score
+            MATCH (d:Document)-[:CONTAINS]->(node)
+            RETURN node, score, d.filename AS document_name
             ORDER BY score DESC
         """, embedding=embedding, user_id=user_id, top_k=top_k)
         return [
-            {"node": dict(record["node"]), "score": record["score"]}
+            {"node": {**dict(record["node"]), "document_name": record["document_name"]}, "score": record["score"]}
             async for record in result
         ]
 

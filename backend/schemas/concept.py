@@ -9,6 +9,10 @@ class ConceptExtracted(BaseModel):
     tags: List[str] = Field(..., min_length=2, max_length=5, description="2-5 lowercase keywords")
 
 
+class ConceptList(BaseModel):
+    concepts: List[ConceptExtracted]
+
+
 class Agent1Output(BaseModel):
     document_id: str
     user_id: str

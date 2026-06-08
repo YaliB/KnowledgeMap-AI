@@ -21,8 +21,14 @@ class Settings(BaseSettings):
     session_expire_days: int
 
     #File Storage
-    upload_dir: str
     max_file_size_mb: int
+
+    #S3
+    use_s3: bool = False
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_region: str = "us-east-1"
+    s3_bucket: str = ""
 
     #App
     allowed_origins: list[str]

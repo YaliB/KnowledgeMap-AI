@@ -1,8 +1,9 @@
-import json
 import logging
+from typing import Literal
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.messages import HumanMessage
+from pydantic import BaseModel
 
 from core.config import settings
 from agent.relationship.state import RelationshipState
@@ -12,6 +13,14 @@ logger = logging.getLogger(__name__)
 
 _llm = ChatOpenAI(model="gpt-4o", temperature=0.2, openai_api_key=settings.openai_api_key)
 _embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=settings.openai_api_key)
+
+
+class RelationshipClassification(BaseModel):
+    rel_type: Literal["related", "prerequisite", "contrasts", "same-idea"]
+    explanation: str
+
+
+_llm_classifier = _llm.with_structured_output(RelationshipClassification)
 
 
 async def embed_concepts_node(state: RelationshipState) -> dict:
@@ -49,8 +58,9 @@ async def classify_relationships_node(state: RelationshipState) -> dict:
             'Respond as JSON: {"rel_type": string, "explanation": string}'
         )
         try:
-            response = await _llm.ainvoke([HumanMessage(content=prompt)])
-            classification = json.loads(response.content)
+            classification: RelationshipClassification = await _llm_classifier.ainvoke(
+                [HumanMessage(content=prompt)]
+            )
         except Exception:
             logger.exception("classify failed for pair %s → %s", concept["id"], neighbor["id"])
             continue
@@ -59,11 +69,11 @@ async def classify_relationships_node(state: RelationshipState) -> dict:
             "concept_a_id": concept["id"],
             "concept_b_id": neighbor["id"],
             "weight": score,
-            "rel_type": classification["rel_type"],
+            "rel_type": classification.rel_type,
             "cross_subject": concept.get("subject") != neighbor.get("subject"),
             "subject_a": concept.get("subject"),
             "subject_b": neighbor.get("subject"),
-            "explanation": classification["explanation"],
+            "explanation": classification.explanation,
         })
 
     return {"relationships": relationships, "current_index": state["current_index"] + 1}
