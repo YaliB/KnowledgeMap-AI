@@ -1,13 +1,13 @@
 from datetime import datetime, UTC
 from uuid import uuid4
 
-from openai import AsyncOpenAI
+from langchain_openai import OpenAIEmbeddings
 
 from core.config import settings
 from infrastructure.db.neo4j import get_session
 from infrastructure.repositories.concept_repo import Neo4jConceptRepo
 
-_openai = AsyncOpenAI(api_key=settings.openai_api_key)
+_embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=settings.openai_api_key)
 
 
 async def save_concepts_from_extractor_agent(document_id: str, user_id: str,
@@ -16,11 +16,7 @@ async def save_concepts_from_extractor_agent(document_id: str, user_id: str,
     async with get_session() as session:
         repo = Neo4jConceptRepo(session)
         for concept in concepts:
-            embedding_response = await _openai.embeddings.create(
-                model="text-embedding-3-small",
-                input=concept["name"] + " " + concept["definition"],
-            )
-            embedding = embedding_response.data[0].embedding
+            embedding = await _embeddings.aembed_query(concept["name"] + " " + concept["definition"])
             concept_id = str(uuid4())
             await repo.create_concept(
                 id=concept_id,

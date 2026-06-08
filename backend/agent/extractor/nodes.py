@@ -3,7 +3,8 @@ import logging
 from datetime import datetime, UTC
 from uuid import uuid4
 
-from openai import AsyncOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_core.messages import HumanMessage
 
 from core.config import settings
 from agent.extractor.state import ExtractorState
@@ -11,7 +12,8 @@ from schemas.concept import ConceptExtracted
 
 logger = logging.getLogger(__name__)
 
-_openai = AsyncOpenAI(api_key=settings.openai_api_key)
+_llm = ChatOpenAI(model="gpt-4o", temperature=0.2, openai_api_key=settings.openai_api_key)
+_embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=settings.openai_api_key)
 
 
 async def read_pdf_node(state: ExtractorState) -> dict:
@@ -34,12 +36,8 @@ Text chunks:
 {state['raw_chunks']}
 """
     try:
-        response = await _openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-        )
-        raw = response.choices[0].message.content
+        response = await _llm.ainvoke([HumanMessage(content=prompt)])
+        raw = response.content
         parsed_concepts = [ConceptExtracted(**item) for item in json.loads(raw)]
         return {"concepts": parsed_concepts}
     except Exception as e:
@@ -49,11 +47,7 @@ Text chunks:
 
 async def save_concepts_node(state: ExtractorState) -> dict:
     for concept in state["concepts"]:
-        embedding_response = await _openai.embeddings.create(
-            model="text-embedding-3-small",
-            input=concept.name + " " + concept.definition,
-        )
-        embedding = embedding_response.data[0].embedding
+        embedding = await _embeddings.aembed_query(concept.name + " " + concept.definition)
         await state["concept_repo"].create_concept(
             id=str(uuid4()),
             user_id=state["user_id"],

@@ -1,7 +1,8 @@
 import json
 import logging
 
-from openai import AsyncOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_core.messages import HumanMessage
 
 from core.config import settings
 from agent.relationship.state import RelationshipState
@@ -9,7 +10,8 @@ from services.db_service import save_relationships_from_relationship_agent, vect
 
 logger = logging.getLogger(__name__)
 
-_openai = AsyncOpenAI(api_key=settings.openai_api_key)
+_llm = ChatOpenAI(model="gpt-4o", temperature=0.2, openai_api_key=settings.openai_api_key)
+_embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=settings.openai_api_key)
 
 
 async def embed_concepts_node(state: RelationshipState) -> dict:
@@ -18,11 +20,8 @@ async def embed_concepts_node(state: RelationshipState) -> dict:
         if concept.get("embedding"):
             updated.append(concept)
             continue
-        response = await _openai.embeddings.create(
-            model="text-embedding-3-small",
-            input=concept["name"] + " " + concept["definition"],
-        )
-        updated.append({**concept, "embedding": response.data[0].embedding})
+        embedding = await _embeddings.aembed_query(concept["name"] + " " + concept["definition"])
+        updated.append({**concept, "embedding": embedding})
     return {"concepts": updated, "current_index": 0}
 
 
@@ -50,12 +49,8 @@ async def classify_relationships_node(state: RelationshipState) -> dict:
             'Respond as JSON: {"rel_type": string, "explanation": string}'
         )
         try:
-            response = await _openai.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-            )
-            classification = json.loads(response.choices[0].message.content)
+            response = await _llm.ainvoke([HumanMessage(content=prompt)])
+            classification = json.loads(response.content)
         except Exception:
             logger.exception("classify failed for pair %s → %s", concept["id"], neighbor["id"])
             continue
