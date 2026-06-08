@@ -12,6 +12,7 @@ from infrastructure.repositories.abstractions.session_repo import AbstractSessio
 from infrastructure.repositories.abstractions.document_repo import AbstractDocumentRepo
 from infrastructure.repositories.abstractions.concept_repo import AbstractConceptRepo
 from services.pdf_service import AbstractPDFService, PyPDFService
+from services.document_service import AbstractDocumentService, DocumentService
 
 
 # --- Repo providers ---
@@ -38,6 +39,13 @@ async def get_concept_repo() -> AbstractConceptRepo:
 
 def get_pdf_service() -> AbstractPDFService:
     return PyPDFService()
+
+
+def get_document_service(
+    doc_repo: AbstractDocumentRepo = Depends(get_document_repo),
+    pdf_service: AbstractPDFService = Depends(get_pdf_service),
+) -> AbstractDocumentService:
+    return DocumentService(doc_repo, pdf_service)
 
 
 def get_auth_service(

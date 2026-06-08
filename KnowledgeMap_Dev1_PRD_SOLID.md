@@ -783,11 +783,86 @@ class UploadResponse(BaseModel):
 
 ---
 
-### Step 17 — Write `apis/routers/documents.py`
+### Step 17 — Write `services/document_service.py` and `apis/routers/documents.py`
 
-All repos and services injected via `Depends()`.
+#### Part A — Write `services/document_service.py`
 
-**`POST /upload`**
+All business logic lives here. The router just delegates.
+
+```python
+from abc import ABC, abstractmethod
+from datetime import datetime
+from uuid import uuid4
+from fastapi import HTTPException
+from schemas.document import UploadResponse, DocumentResponse
+from infrastructure.repositories.abstractions.document_repo import AbstractDocumentRepo
+from services.pdf_service import AbstractPDFService
+
+class AbstractDocumentService(ABC):
+    @abstractmethod
+    async def upload(self, files: list, subjects: list[str], user_id: str) -> UploadResponse: ...
+
+    @abstractmethod
+    async def get_documents(self, user_id: str) -> list[DocumentResponse]: ...
+
+    @abstractmethod
+    async def delete_document(self, doc_id: str, user_id: str) -> None: ...
+
+
+class DocumentService(AbstractDocumentService):
+    def __init__(
+        self,
+        doc_repo: AbstractDocumentRepo,
+        pdf_service: AbstractPDFService,
+    ):
+        self.doc_repo = doc_repo
+        self.pdf_service = pdf_service
+
+    async def upload(self, files: list, subjects: list[str], user_id: str) -> UploadResponse:
+        if len(files) != len(subjects):
+            raise HTTPException(status_code=400, detail="Each file must have a matching subject")
+        results = []
+        for file, subject in zip(files, subjects):
+            content = await file.read()
+            self.pdf_service.validate(file.filename, len(content))
+            file_path = self.pdf_service.save(content, file.filename)
+            page_count = self.pdf_service.count_pages(file_path)
+            doc = await self.doc_repo.create_document(
+                id=str(uuid4()),
+                user_id=user_id,
+                filename=file.filename,
+                subject=subject,
+                file_path=file_path,
+                page_count=page_count,
+                created_at=datetime.utcnow().isoformat(),
+            )
+            results.append(doc)
+        return UploadResponse(documents=results)
+
+    async def get_documents(self, user_id: str) -> list[DocumentResponse]:
+        return await self.doc_repo.get_user_documents(user_id)
+
+    async def delete_document(self, doc_id: str, user_id: str) -> None:
+        await self.doc_repo.delete_document_and_concepts(user_id, doc_id)
+```
+
+Add to `apis/dependencies.py`:
+
+```python
+from services.document_service import AbstractDocumentService, DocumentService
+
+def get_document_service(
+    doc_repo: AbstractDocumentRepo = Depends(get_document_repo),
+    pdf_service: AbstractPDFService = Depends(get_pdf_service),
+) -> AbstractDocumentService:
+    return DocumentService(doc_repo, pdf_service)
+```
+
+---
+
+#### Part B — Write `apis/routers/documents.py`
+
+Router is thin — HTTP concerns only. No business logic here.
 
 ```python
 @router.post("/upload")
@@ -795,46 +870,27 @@ async def upload(
     files: list[UploadFile] = File(...),
     subjects: list[str] = Form(...),
     user_id: str = Depends(get_current_user),
-    doc_repo: AbstractDocumentRepo = Depends(get_document_repo),
-    pdf_service: AbstractPDFService = Depends(get_pdf_service),
+    document_service: AbstractDocumentService = Depends(get_document_service),
 ):
-    results = []
-    for file, subject in zip(files, subjects):
-        content = await file.read()
-        pdf_service.validate(file.filename, len(content))
-        file_path = pdf_service.save(content, file.filename)
-        page_count = pdf_service.count_pages(file_path)
-        doc = await doc_repo.create_document(
-            id=str(uuid4()), user_id=user_id, filename=file.filename,
-            subject=subject, file_path=file_path,
-            page_count=page_count, created_at=datetime.utcnow().isoformat()
-        )
-        results.append(doc)
-    return UploadResponse(documents=results)
-```
+    return await document_service.upload(files, subjects, user_id)
 
-**`GET /documents`**
 
-```python
 @router.get("/documents")
 async def get_documents(
     user_id: str = Depends(get_current_user),
-    doc_repo: AbstractDocumentRepo = Depends(get_document_repo),
+    document_service: AbstractDocumentService = Depends(get_document_service),
 ):
-    docs = await doc_repo.get_user_documents(user_id)
+    docs = await document_service.get_documents(user_id)
     return {"documents": docs}
-```
 
-**`DELETE /document/{id}`**
 
-```python
 @router.delete("/document/{doc_id}")
 async def delete_document(
     doc_id: str,
     user_id: str = Depends(get_current_user),
-    doc_repo: AbstractDocumentRepo = Depends(get_document_repo),
+    document_service: AbstractDocumentService = Depends(get_document_service),
 ):
-    await doc_repo.delete_document_and_concepts(user_id, doc_id)
+    await document_service.delete_document(doc_id, user_id)
     return {"message": "deleted"}
 ```
 
