@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     neo4j_password: str
     neo4j_dbname: str
 
+    #MongoDB
+    mongodb_uri: str
+    mongodb_db: str
+
     #Session
     session_secret: str
     session_expire_days: int
