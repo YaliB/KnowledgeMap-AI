@@ -17,6 +17,6 @@ app.add_middleware(
 
 app.include_router(health)
 
-app.include_router(auth.router, prefix="/auth")
+app.include_router(auth, prefix="/auth")
 
-app.include_router(documents.router)
+app.include_router(documents)
