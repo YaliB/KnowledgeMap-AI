@@ -1,5 +1,6 @@
 from fastapi import Depends, HTTPException, Request
 
+from services.auth_service import AbstractAuthService, AuthService
 from infrastructure.db.collection import users_collection, sessions_collection
 from infrastructure.db.neo4j import get_session
 from infrastructure.repositories.user_repo import MongoUserRepo
@@ -37,6 +38,14 @@ async def get_concept_repo() -> AbstractConceptRepo:
 
 def get_pdf_service() -> AbstractPDFService:
     return PyPDFService()
+
+
+def get_auth_service(
+    user_repo: AbstractUserRepo = Depends(get_user_repo),
+    session_repo: AbstractSessionRepo = Depends(get_session_repo),
+    doc_repo: AbstractDocumentRepo = Depends(get_document_repo),
+) -> AbstractAuthService:
+    return AuthService(user_repo, session_repo, doc_repo)
 
 
 # --- Auth dependency ---

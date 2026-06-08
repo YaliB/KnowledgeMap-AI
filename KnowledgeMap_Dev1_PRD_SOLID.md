@@ -577,60 +577,127 @@ Every protected route uses `user_id: str = Depends(get_current_user)`.
 
 ---
 
-### Step 14 — Write `apis/routers/auth.py`
+### Step 14 — Write `services/auth_service.py` and `apis/routers/auth.py`
 
-Routers receive repos via `Depends()` — never import or instantiate concrete classes here.
+#### Part A — Write `services/auth_service.py`
 
-**`POST /auth/register`**
+All business logic lives here. The router just delegates.
+
+```python
+from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
+from uuid import uuid4
+from passlib.hash import bcrypt
+from fastapi import HTTPException
+from schemas.user import RegisterRequest, LoginRequest, UserResponse
+from infrastructure.repositories.abstractions.user_repo import AbstractUserRepo
+from infrastructure.repositories.abstractions.session_repo import AbstractSessionRepo
+from infrastructure.repositories.abstractions.document_repo import AbstractDocumentRepo
+from core.config import settings
+
+class AbstractAuthService(ABC):
+    @abstractmethod
+    async def register(self, body: RegisterRequest) -> tuple[UserResponse, str]: ...
+
+    @abstractmethod
+    async def login(self, body: LoginRequest) -> tuple[UserResponse, str]:
+        """Returns UserResponse + session_id to set as cookie."""
+        ...
+
+    @abstractmethod
+    async def logout(self, session_id: str) -> None: ...
+
+
+class AuthService(AbstractAuthService):
+    def __init__(
+        self,
+        user_repo: AbstractUserRepo,
+        session_repo: AbstractSessionRepo,
+        doc_repo: AbstractDocumentRepo,
+    ):
+        self.user_repo = user_repo
+        self.session_repo = session_repo
+        self.doc_repo = doc_repo
+
+    async def register(self, body: RegisterRequest) -> tuple[UserResponse, str]:
+        existing = await self.user_repo.find_by_email(body.email)
+        if existing:
+            raise HTTPException(status_code=409, detail="Email already registered")
+        hashed = bcrypt.hash(body.password)
+        user_id = "user_" + uuid4().hex[:8]
+        await self.user_repo.create_user(user_id, body.name, body.email, hashed)
+        await self.doc_repo.create_user_node(user_id, body.name, datetime.utcnow().isoformat())
+        session_id = await self._create_session(user_id)
+        return UserResponse(user_id=user_id, name=body.name, email=body.email), session_id
+
+    async def login(self, body: LoginRequest) -> tuple[UserResponse, str]:
+        user = await self.user_repo.find_by_email(body.email)
+        if not user or not bcrypt.verify(body.password, user["hashed_password"]):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        session_id = await self._create_session(user["_id"])
+        return UserResponse(user_id=user["_id"], name=user["name"], email=user["email"]), session_id
+
+    async def logout(self, session_id: str) -> None:
+        await self.session_repo.delete_session(session_id)
+
+    async def _create_session(self, user_id: str) -> str:
+        session_id = "sess_" + uuid4().hex
+        expires_at = datetime.utcnow() + timedelta(days=settings.session_expire_days)
+        await self.session_repo.create_session(session_id, user_id, expires_at)
+        return session_id
+```
+
+Add to `apis/dependencies.py`:
+
+```python
+from services.auth_service import AbstractAuthService, AuthService
+
+def get_auth_service(
+    user_repo: AbstractUserRepo = Depends(get_user_repo),
+    session_repo: AbstractSessionRepo = Depends(get_session_repo),
+    doc_repo: AbstractDocumentRepo = Depends(get_document_repo),
+) -> AbstractAuthService:
+    return AuthService(user_repo, session_repo, doc_repo)
+```
+
+---
+
+#### Part B — Write `apis/routers/auth.py`
+
+Router is now thin — HTTP concerns only. No business logic here.
 
 ```python
 @router.post("/register")
 async def register(
+    response: Response,
     body: RegisterRequest,
-    user_repo: AbstractUserRepo = Depends(get_user_repo),
-    session_repo: AbstractSessionRepo = Depends(get_session_repo),
-    doc_repo: AbstractDocumentRepo = Depends(get_document_repo),
+    auth_service: AbstractAuthService = Depends(get_auth_service),
 ):
-    existing = await user_repo.find_by_email(body.email)
-    if existing:
-        raise HTTPException(status_code=409, detail="Email already registered")
-    hashed = bcrypt.hash(body.password)
-    user_id = "user_" + uuid4().hex[:8]
-    await user_repo.create_user(user_id, body.name, body.email, hashed)
-    await doc_repo.create_user_node(user_id, body.name, datetime.utcnow().isoformat())
-    # create session, set httpOnly cookie
-    ...
-    return UserResponse(user_id=user_id, name=body.name, email=body.email)
-```
+    user, session_id = await auth_service.register(body)
+    response.set_cookie("session_id", session_id, httponly=True)
+    return user
 
-**`POST /auth/login`**
 
-```python
 @router.post("/login")
 async def login(
+    response: Response,
     body: LoginRequest,
-    user_repo: AbstractUserRepo = Depends(get_user_repo),
-    session_repo: AbstractSessionRepo = Depends(get_session_repo),
+    auth_service: AbstractAuthService = Depends(get_auth_service),
 ):
-    user = await user_repo.find_by_email(body.email)
-    if not user or not bcrypt.verify(body.password, user["hashed_password"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    # create session, set httpOnly cookie
-    ...
-```
+    user, session_id = await auth_service.login(body)
+    response.set_cookie("session_id", session_id, httponly=True)
+    return user
 
-**`POST /auth/logout`**
 
-```python
 @router.post("/logout")
 async def logout(
     request: Request,
     response: Response,
-    session_repo: AbstractSessionRepo = Depends(get_session_repo),
+    auth_service: AbstractAuthService = Depends(get_auth_service),
 ):
     session_id = request.cookies.get("session_id")
     if session_id:
-        await session_repo.delete_session(session_id)
+        await auth_service.logout(session_id)
     response.delete_cookie("session_id")
     return {"message": "logged out"}
 ```
@@ -638,7 +705,6 @@ async def logout(
 > **Never store or log plain text passwords anywhere.**
 
 > **Checkpoint:** `curl -X POST /auth/register` -> confirm session cookie set + `:User` node visible in Neo4j Browser.
-
 ---
 
 ## Phase 4 — PDF Upload & Documents
