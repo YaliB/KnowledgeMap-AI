@@ -15,7 +15,7 @@ jobs:
         ports:
           - 27017:27017
       neo4j:
-        image: neo4j:5.12-community
+        image: neo4j:5.18-community
         ports:
           - 7474:7474
           - 7687:7687
@@ -36,7 +36,7 @@ jobs:
         pip install -r requirements.txt
         pip install pytest httpx
 
-    - name: Run Test Matrix
+    - name: Run Tests
       env:
         OPENAI_API_KEY: ${{ secrets.TEST_OPENAI_API_KEY }}
         NEO4J_URI: bolt://localhost:7687
