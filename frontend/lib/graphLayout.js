@@ -112,33 +112,37 @@ export function computeLayout(subjects, nodes) {
       // Process subtopics sequentially by topic into a two-column grid layout
       let subtopicY = columnBottom + COL.TOPIC_TO_SUBTOPIC
       let anySubtopics = false
+      // Shared slot counter across ALL topics so column assignment never resets
+      // at a topic boundary, which would cause two consecutive left-column items
+      let subtopicSlot = 0
 
-      topics.forEach((topic) => {
-        const subtopics = subtopicsByTopic.get(topic.id) || []
+      const allSubtopics = topics.flatMap((topic) => subtopicsByTopic.get(topic.id) || [])
 
-        subtopics.forEach((subtopic, index) => {
-          anySubtopics = true
+      allSubtopics.forEach((subtopic) => {
+        anySubtopics = true
 
-          // Split across two columns: index % 2 determines left (0) or right (1)
-          const isRightCol = index % 2 === 1
-          const nodeX = isRightCol
-              ? colX + 10 + COL.NODE_WIDTH + COL.SUBTOPIC_X_GAP
-              : colX + 10
+        // Split across two columns: slot % 2 determines left (0) or right (1)
+        const isRightCol = subtopicSlot % 2 === 1
+        const nodeX = isRightCol
+            ? colX + 10 + COL.NODE_WIDTH + COL.SUBTOPIC_X_GAP
+            : colX + 10
 
-          pos[subtopic.id] = {
-            x: nodeX,
-            y: subtopicY,
-            w: COL.NODE_WIDTH,
-            h: COL.SUBTOPIC_H,
-            tier: 2,
-            color: colorSet,
-          }
+        pos[subtopic.id] = {
+          x: nodeX,
+          y: subtopicY,
+          w: COL.NODE_WIDTH,
+          h: COL.SUBTOPIC_H,
+          tier: 2,
+          color: colorSet,
+        }
 
-          // Advance y-coordinate down only after every second element (filling rows)
-          if (isRightCol || index === subtopics.length - 1) {
-            subtopicY += COL.SUBTOPIC_H + COL.SUBTOPIC_GAP
-          }
-        })
+        // Advance y-coordinate down only after filling the right column,
+        // or when this is the very last subtopic
+        if (isRightCol || subtopicSlot === allSubtopics.length - 1) {
+          subtopicY += COL.SUBTOPIC_H + COL.SUBTOPIC_GAP
+        }
+
+        subtopicSlot++
       })
 
       if (anySubtopics) columnBottom = subtopicY - COL.SUBTOPIC_GAP

@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 from agent.extractor.nodes import read_pdf_node, extract_concepts_node
 from agent.relationship.graph import build_relationship_graph
@@ -21,7 +22,7 @@ async def run_extraction_pipeline(document_id: str, user_id: str, file_path: str
             "document_id": document_id,
             "user_id": user_id,
             "subject": subject,
-            "filename": file_path.split("/")[-1],
+            "filename": Path(file_path).name,
             "file_path": file_path,
             "raw_chunks": [],
             "concepts": [],

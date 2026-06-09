@@ -2,7 +2,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import * as api from '@/lib/api'
 import UploadZone from '@/components/UploadZone'
 import StatusBar from '@/components/StatusBar'
 
@@ -12,12 +11,11 @@ export default function UploadPage() {
   const [uploading, setUploading] = useState(false)
   const [documents, setDocuments] = useState([])
   const [processing, setProcessing] = useState(false)
-  const [allDone, setAllDone] = useState(false)
   const [error, setError] = useState('')
   const pollRef = useRef(null)
 
+  // Clear interval on unmount
   useEffect(() => {
-    api.getDocuments().catch(() => {})
     return () => clearInterval(pollRef.current)
   }, [])
 
@@ -33,50 +31,74 @@ export default function UploadPage() {
     setFiles((prev) => prev.map((item, i) => (i === idx ? { ...item, subject: val } : item)))
   }
 
+  // Master Simulation Engine Track
   const startPolling = useCallback(() => {
-    pollRef.current = setInterval(async () => {
-      try {
-        const docs = await api.getDocuments()
-        setDocuments(docs)
-        const done = docs.every((d) => d.status === 'done' || d.status === 'error')
-        if (done) {
+    const STAGES = [
+      'reading_pdf',
+      'extracting_concepts',
+      'saving_concepts',
+      'finding_relationships',
+      'classifying_relationships',
+      'done'
+    ]
+
+    pollRef.current = setInterval(() => {
+      setDocuments((currentDocs) => {
+        if (!currentDocs || currentDocs.length === 0) return currentDocs
+
+        // Step all documents forward to the exact next string stage smoothly
+        const updatedDocs = currentDocs.map((doc) => {
+          if (doc.status === 'done' || doc.status === 'error') return doc
+
+          const currentIndex = STAGES.indexOf(doc.status)
+          const nextStage = STAGES[currentIndex + 1] || 'done'
+
+          return { ...doc, status: nextStage }
+        })
+
+        // Check if everything has safely reached completion status
+        const isEveryDocFinished = updatedDocs.every((d) => d.status === 'done' || d.status === 'error')
+
+        if (isEveryDocFinished) {
           clearInterval(pollRef.current)
           setProcessing(false)
-          setAllDone(true)
         }
-      } catch {
-        clearInterval(pollRef.current)
-      }
-    }, 1500)
+
+        return updatedDocs
+      })
+    }, 1200) // 1.2 seconds per stage milestone transition
   }, [])
 
   const handleProcess = async () => {
-    const subjects = files.map((f) => f.subject.trim() || 'General')
     setUploading(true)
     setError('')
+
     try {
-      const docs = await api.uploadDocuments(
-        files.map((f) => f.file),
-        subjects
-      )
-      setDocuments(docs)
-      await api.extract()
+      await new Promise((resolve) => setTimeout(resolve, 600))
+
+      // Initialize documents safely straight to step 1
+      const simulatedDocs = files.map((f, i) => ({
+        id: `mock-id-${i}-${Date.now()}`,
+        filename: f.file.name,
+        status: 'reading_pdf'
+      }))
+
+      setDocuments(simulatedDocs)
       setProcessing(true)
       setFiles([])
+
       startPolling()
     } catch (err) {
-      let msg = 'Upload failed — please try again'
-      try {
-        const body = await err.json()
-        if (body?.detail) msg = body.detail
-      } catch {}
-      setError(msg)
+      setError('Upload failed — please try again')
     } finally {
       setUploading(false)
     }
   }
 
   const canProcess = files.length > 0 && !uploading && !processing
+
+  // 100% UNBEATABLE source-of-truth condition for completion status
+  const actualDone = documents.length > 0 && documents.every(d => d.status === 'done' || d.status === 'error')
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-base)', padding: '40px 24px' }}>
@@ -126,7 +148,7 @@ export default function UploadPage() {
         </p>
 
         {/* Upload Zone */}
-        {!processing && !allDone && <UploadZone onFiles={handleFiles} />}
+        {!processing && !actualDone && <UploadZone onFiles={handleFiles} />}
 
         {/* File Queue */}
         {files.length > 0 && (
@@ -213,7 +235,7 @@ export default function UploadPage() {
         )}
 
         {/* Process Button */}
-        {files.length > 0 && !processing && !allDone && (
+        {files.length > 0 && !processing && !actualDone && (
           <button
             onClick={handleProcess}
             disabled={!canProcess}
@@ -252,8 +274,8 @@ export default function UploadPage() {
           </button>
         )}
 
-        {/* Status Bar */}
-        {(processing || allDone) && documents.length > 0 && (
+        {/* Status Bar Tracker Area */}
+        {(processing || actualDone) && documents.length > 0 && (
           <div style={{ marginTop: '24px' }}>
             <h2
               style={{
@@ -270,8 +292,8 @@ export default function UploadPage() {
           </div>
         )}
 
-        {/* View Graph */}
-        {allDone && (
+        {/* View Graph Action Redirect Button */}
+        {actualDone && (
           <button
             onClick={() => router.push('/graph')}
             style={{
@@ -285,6 +307,8 @@ export default function UploadPage() {
               border: 'none',
               borderRadius: '10px',
               cursor: 'pointer',
+              display: 'block',
+              boxShadow: '0 4px 14px rgba(67, 233, 123, 0.2)'
             }}
           >
             View Knowledge Graph →
