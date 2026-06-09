@@ -2,9 +2,7 @@ import logging
 
 from agent.extractor.nodes import read_pdf_node, extract_concepts_node
 from agent.relationship.graph import build_relationship_graph
-from infrastructure.db.neo4j import get_session
-from infrastructure.repositories.document_repo import Neo4jDocumentRepo
-from services.db_service import save_concepts_from_extractor_agent
+from services.db_service import save_concepts_from_extractor_agent, set_document_status
 from services.pdf_service import PyPDFService
 
 logger = logging.getLogger(__name__)
@@ -14,13 +12,11 @@ _pdf_service = PyPDFService()
 
 
 async def run_extraction_pipeline(document_id: str, user_id: str, file_path: str, subject: str) -> None:
-    async with get_session() as session:
-        doc_repo = Neo4jDocumentRepo(session)
-        await doc_repo.update_document_status(user_id, document_id, "processing")
+    async def status(s: str) -> None:
+        await set_document_status(user_id, document_id, s)
 
     try:
-        # Call extractor nodes directly to skip the graph's built-in save step,
-        # so we can capture IDs and embeddings from db_service for the relationship agent.
+        await status("reading_pdf")
         state: dict = {
             "document_id": document_id,
             "user_id": user_id,
@@ -35,12 +31,15 @@ async def run_extraction_pipeline(document_id: str, user_id: str, file_path: str
             "pdf_service": _pdf_service,
         }
         state = {**state, **await read_pdf_node(state)}
+
+        await status("extracting_concepts")
         state = {**state, **await extract_concepts_node(state)}
 
         if state.get("error"):
             raise RuntimeError(state["error"])
 
-        raw_concepts = [{**c.model_dump(), "subject": subject} for c in state["concepts"]]
+        await status("saving_concepts")
+        raw_concepts = [c.model_dump() for c in state["concepts"]]
         saved_concepts = await save_concepts_from_extractor_agent(document_id, user_id, raw_concepts)
 
         if saved_concepts:
@@ -50,18 +49,13 @@ async def run_extraction_pipeline(document_id: str, user_id: str, file_path: str
                 "concepts": saved_concepts,
                 "relationships": [],
                 "candidate_pairs": [],
-                "current_index": 0,
                 "error": None,
                 "status": "processing",
             })
 
-        async with get_session() as session:
-            doc_repo = Neo4jDocumentRepo(session)
-            await doc_repo.update_document_status(user_id, document_id, "done")
+        await status("done")
 
     except Exception:
         logger.exception("Extraction pipeline failed for document %s", document_id)
-        async with get_session() as session:
-            doc_repo = Neo4jDocumentRepo(session)
-            await doc_repo.update_document_status(user_id, document_id, "error")
+        await set_document_status(user_id, document_id, "error")
         raise

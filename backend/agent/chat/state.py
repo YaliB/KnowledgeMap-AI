@@ -12,3 +12,4 @@ class ChatState(TypedDict):
     highlighted_node_ids: List[str]
     error: Optional[str]
     status: str
+    messages: list  # working message thread for the tool-call loop

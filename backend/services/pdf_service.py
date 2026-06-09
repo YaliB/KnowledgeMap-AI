@@ -39,7 +39,7 @@ class PyPDFService(AbstractPDFService):
     """Local-disk implementation — kept for unit testing."""
 
     def validate(self, filename: str, size_bytes: int) -> None:
-        if not filename.endswith(".pdf"):
+        if not filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="Only PDF files accepted")
         if size_bytes > settings.max_file_size_mb * 1024 * 1024:
             raise HTTPException(status_code=400, detail="File too large")
@@ -81,7 +81,7 @@ class S3PDFService(AbstractPDFService):
         self._bucket = settings.s3_bucket
 
     def validate(self, filename: str, size_bytes: int) -> None:
-        if not filename.endswith(".pdf"):
+        if not filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="Only PDF files accepted")
         if size_bytes > settings.max_file_size_mb * 1024 * 1024:
             raise HTTPException(status_code=400, detail="File too large")

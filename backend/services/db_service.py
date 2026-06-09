@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, UTC
 from uuid import uuid4
 
@@ -12,11 +13,16 @@ _embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=se
 
 async def save_concepts_from_extractor_agent(document_id: str, user_id: str,
                                              concepts: list[dict]) -> list[dict]:
+    # Embed all concepts in parallel — one API call per concept but all in-flight at once
+    embeddings = await asyncio.gather(*[
+        _embeddings.aembed_query(c["name"] + " " + c["definition"])
+        for c in concepts
+    ])
+
     created = []
     async with get_session() as session:
         repo = Neo4jConceptRepo(session)
-        for concept in concepts:
-            embedding = await _embeddings.aembed_query(concept["name"] + " " + concept["definition"])
+        for concept, embedding in zip(concepts, embeddings):
             concept_id = str(uuid4())
             await repo.create_concept(
                 id=concept_id,
@@ -24,7 +30,9 @@ async def save_concepts_from_extractor_agent(document_id: str, user_id: str,
                 document_id=document_id,
                 name=concept["name"],
                 definition=concept["definition"],
+                level=concept.get("level", "subtopic"),
                 subject=concept["subject"],
+                parent=concept.get("parent"),
                 importance=concept["importance"],
                 tags=concept["tags"],
                 embedding=embedding,
@@ -51,6 +59,13 @@ async def save_relationships_from_relationship_agent(relationships: list[dict]) 
             )
 
 
+async def set_document_status(user_id: str, document_id: str, status: str) -> None:
+    async with get_session() as session:
+        from infrastructure.repositories.document_repo import Neo4jDocumentRepo
+        repo = Neo4jDocumentRepo(session)
+        await repo.update_document_status(user_id, document_id, status)
+
+
 async def get_graph_for_user(user_id: str) -> dict:
     from services.graph_service import build_graph_response
     async with get_session() as session:
@@ -64,3 +79,10 @@ async def vector_search(embedding: list[float], user_id: str) -> list[dict]:
     async with get_session() as session:
         repo = Neo4jConceptRepo(session)
         return await repo.vector_similarity_search(embedding, user_id)
+
+
+async def vector_search_for_relationships(embedding: list[float], user_id: str) -> list[dict]:
+    """Wider search for relationship discovery — lower threshold to catch cross-subject connections."""
+    async with get_session() as session:
+        repo = Neo4jConceptRepo(session)
+        return await repo.vector_similarity_search(embedding, user_id, top_k=20, min_score=0.60)
