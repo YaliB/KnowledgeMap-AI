@@ -8,18 +8,19 @@ class Neo4jConceptRepo(AbstractConceptRepo):
         self.session = session
 
     async def create_concept(self, id: str, user_id: str, document_id: str, name: str,
-                              definition: str, subject: str, importance: float,
-                              tags: list[str], embedding: list[float], created_at: str) -> dict:
+                              definition: str, level: str, subject: str, parent: str | None,
+                              importance: float, tags: list[str], embedding: list[float],
+                              created_at: str) -> dict:
         result = await self.session.run("""
             MATCH (d:Document {id: $document_id, user_id: $user_id})
             CREATE (c:Concept {id: $id, user_id: $user_id, name: $name,
-                definition: $definition, subject: $subject, importance: $importance,
-                tags: $tags, embedding: $embedding, created_at: $created_at})
+                definition: $definition, level: $level, subject: $subject, parent: $parent,
+                importance: $importance, tags: $tags, embedding: $embedding, created_at: $created_at})
             CREATE (d)-[:CONTAINS]->(c)
             RETURN c
         """, id=id, user_id=user_id, document_id=document_id, name=name,
-             definition=definition, subject=subject, importance=importance,
-             tags=tags, embedding=embedding, created_at=created_at)
+             definition=definition, level=level, subject=subject, parent=parent,
+             importance=importance, tags=tags, embedding=embedding, created_at=created_at)
         return dict((await result.single())["c"])
 
     async def get_concepts_for_user(self, user_id: str) -> list[dict]:
@@ -69,16 +70,16 @@ class Neo4jConceptRepo(AbstractConceptRepo):
         """, concept_a_id=concept_a_id, concept_b_id=concept_b_id, **props)
 
     async def vector_similarity_search(self, embedding: list[float], user_id: str,
-                                       top_k: int = 10) -> list[dict]:
+                                       top_k: int = 10, min_score: float = 0.75) -> list[dict]:
         result = await self.session.run("""
             CALL db.index.vector.queryNodes('concept-embeddings', $top_k, $embedding)
             YIELD node, score
             WHERE node.user_id = $user_id
-              AND score > 0.75
+              AND score > $min_score
             MATCH (d:Document)-[:CONTAINS]->(node)
             RETURN node, score, d.filename AS document_name
             ORDER BY score DESC
-        """, embedding=embedding, user_id=user_id, top_k=top_k)
+        """, embedding=embedding, user_id=user_id, top_k=top_k, min_score=min_score)
         return [
             {"node": {**dict(record["node"]), "document_name": record["document_name"]}, "score": record["score"]}
             async for record in result
@@ -92,7 +93,9 @@ class Neo4jConceptRepo(AbstractConceptRepo):
               collect(DISTINCT {
                 id: c.id,
                 name: c.name,
+                level: c.level,
                 subject: c.subject,
+                parent: c.parent,
                 importance: c.importance,
                 definition: c.definition,
                 source_document: d.filename,

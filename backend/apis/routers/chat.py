@@ -29,6 +29,7 @@ async def chat(
         "highlighted_node_ids": [],
         "error": None,
         "status": "",
+        "messages": [],
     }
     try:
         result = await _chat_graph.ainvoke(state)

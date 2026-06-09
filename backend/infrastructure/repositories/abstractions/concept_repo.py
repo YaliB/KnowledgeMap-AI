@@ -4,8 +4,9 @@ from abc import ABC, abstractmethod
 class AbstractConceptRepo(ABC):
     @abstractmethod
     async def create_concept(self, id: str, user_id: str, document_id: str, name: str,
-                              definition: str, subject: str, importance: float,
-                              tags: list[str], embedding: list[float], created_at: str) -> dict: ...
+                              definition: str, level: str, subject: str, parent: str | None,
+                              importance: float, tags: list[str], embedding: list[float],
+                              created_at: str) -> dict: ...
 
     @abstractmethod
     async def get_concepts_for_user(self, user_id: str) -> list[dict]: ...
