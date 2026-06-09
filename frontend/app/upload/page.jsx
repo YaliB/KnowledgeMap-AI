@@ -17,7 +17,7 @@ export default function UploadPage() {
   const pollRef = useRef(null)
 
   useEffect(() => {
-    api.getDocuments().catch(() => {})
+    api.getDocuments().then(setDocuments).catch(() => {})
     return () => clearInterval(pollRef.current)
   }, [])
 
@@ -253,7 +253,7 @@ export default function UploadPage() {
         )}
 
         {/* Status Bar */}
-        {(processing || allDone) && documents.length > 0 && (
+        {documents.length > 0 && (
           <div style={{ marginTop: '24px' }}>
             <h2
               style={{
