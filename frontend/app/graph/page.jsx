@@ -17,23 +17,35 @@ export default function GraphPage() {
   const [activeSubjects, setActiveSubjects] = useState(new Set())
   const [collapsedTopics, setCollapsedTopics] = useState(new Set())
   const [edgeFilter, setEdgeFilter] = useState('all')
+  const [chatVisible, setChatVisible] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [chatResetKey, setChatResetKey] = useState(0)
 
   useEffect(() => {
-    api
-      .getGraph()
-      .then((data) => {
+    const initializePage = async () => {
+      try {
+        try {
+          await api.createChatSession()
+          setChatResetKey((prev) => prev + 1)
+        } catch {
+          // Chat session init should not block graph rendering.
+        }
+
+        const data = await api.getGraph()
         setGraphData(data)
         setActiveSubjects(new Set(data.subjects))
         // Start with all topics collapsed so only subjects+topics are visible
-        const allTopicIds = new Set(
-          data.nodes.filter((n) => n.level === 'topic').map((n) => n.id)
-        )
+        const allTopicIds = new Set(data.nodes.filter((n) => n.level === 'topic').map((n) => n.id))
         setCollapsedTopics(allTopicIds)
+      } catch {
+        setError('Failed to load graph')
+      } finally {
         setLoading(false)
-      })
-      .catch(() => setError('Failed to load graph'))
+      }
+    }
+
+    initializePage()
   }, [])
 
   // Map from topic name → topic node id, used to resolve subtopic parents
@@ -190,6 +202,21 @@ export default function GraphPage() {
           + Upload
         </Link>
         <button
+          onClick={() => setChatVisible((prev) => !prev)}
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            color: 'var(--text-primary)',
+            fontSize: '12px',
+            borderRadius: '6px',
+            padding: '5px 10px',
+            cursor: 'pointer',
+            fontWeight: '600',
+          }}
+        >
+          {chatVisible ? 'Hide Chat' : 'Show Chat'}
+        </button>
+        <button
           onClick={handleLogout}
           style={{
             background: 'none',
@@ -337,11 +364,15 @@ export default function GraphPage() {
         </div>
 
         {/* Chat sidebar */}
-        <ChatSidebar
-          onHighlight={setHighlightedNodes}
-          subjects={graphData?.subjects || []}
-          onSelectNode={setSelectedNode}
-        />
+        {chatVisible && (
+          <ChatSidebar
+            key={chatResetKey}
+            onHighlight={setHighlightedNodes}
+            subjects={graphData?.subjects || []}
+            onSelectNode={setSelectedNode}
+            width="460px"
+          />
+        )}
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

@@ -1,7 +1,7 @@
 from agent.chat.state import ChatState
 
 
-def route_after_retrieval(state: ChatState) -> str:
+def route_after_graph_fetch(state: ChatState) -> str:
     if state.get("error"):
         return "error"
     return "load_history"

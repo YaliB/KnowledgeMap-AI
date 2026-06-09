@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import Depends, HTTPException, Request
 
 from services.auth_service import AbstractAuthService, AuthService
@@ -70,3 +72,7 @@ async def get_current_user(
     if not session:
         raise HTTPException(status_code=401, detail="Session expired")
     return session["user_id"]
+
+
+def get_chat_session_id(request: Request) -> Optional[str]:
+    return request.cookies.get("chat_session_id")

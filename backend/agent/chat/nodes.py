@@ -22,59 +22,61 @@ _embeddings = OpenAIEmbeddings(
 
 _SYSTEM_PROMPT = (
     "You are a study assistant for KnowledgeMap AI. "
-    "You have access to the user's knowledge graph via tools. "
-    "Use the initial context provided, and call tools to retrieve additional concepts when needed. "
+    "You are given the user's full knowledge graph (documents, concepts, and relationships). "
+    "Use this graph as your primary context when answering questions. "
+    "You may also call tools to look up additional concept details when needed. "
     "For each point you make, cite the source document and subject. "
     "Format citations as: [Concept Name] (subject, document_name)."
 )
 
 
-async def embed_query_node(state: ChatState) -> dict:
-    embedding = await _embeddings.aembed_query(state["message"])
-    return {"message_embedding": embedding}
+_GRAPH_QUERY = """
+MATCH (u:User {user_id: $user_id})
+OPTIONAL MATCH (u)-[:OWNS]->(d:Document)
+OPTIONAL MATCH (c:Concept {user_id: $user_id})
+OPTIONAL MATCH (c)-[r:RELATED_TO]->(c2:Concept {user_id: $user_id})
+RETURN collect(DISTINCT d) as documents,
+       collect(DISTINCT c) as concepts,
+       collect(DISTINCT {from: c.name, to: c2.name, type: r.type, weight: r.weight}) as relationships
+"""
 
 
-async def retrieve_context_node(state: ChatState) -> dict:
-    embedding = state["message_embedding"]
-    assert embedding is not None
+async def fetch_graph_context_node(state: ChatState) -> dict:
     async with get_session() as session:
-        repo = Neo4jConceptRepo(session)
-        results = await repo.vector_similarity_search(embedding, state["user_id"], top_k=5)
+        result = await session.run(_GRAPH_QUERY, user_id=state["user_id"])
+        record = await result.single()
 
-    top5 = results[:5]
-    sources = [
-        {
-            "concept_id": r["node"]["id"],
-            "concept_name": r["node"]["name"],
-            "document_name": r["node"].get("document_name", ""),
-            "subject": r["node"].get("subject", ""),
-            "relevance_score": r["score"],
+    if record is None:
+        return {
+            "graph_context": {"documents": [], "concepts": [], "relationships": []},
+            "highlighted_node_ids": [],
         }
-        for r in top5
+
+    documents = [dict(d) for d in record["documents"]]
+    concepts = [dict(c) for c in record["concepts"]]
+    relationships = [
+        dict(r) for r in record["relationships"]
+        if r.get("from") or r.get("to")
     ]
+
     return {
-        "retrieved_concepts": [r["node"] for r in top5],
-        "sources": sources,
-        "highlighted_node_ids": [s["concept_id"] for s in sources],
+        "graph_context": {"documents": documents, "concepts": concepts, "relationships": relationships},
+        "highlighted_node_ids": [c.get("id", "") for c in concepts],
     }
 
 
 async def load_history_node(state: ChatState) -> dict:
-    history = await get_recent_messages(state["user_id"], limit=10)
+    history = await get_recent_messages(
+        state["user_id"],
+        state["chat_session_id"],
+        limit=10,
+    )
     return {"chat_history": history}
 
 
 async def generate_reply_node(state: ChatState) -> dict:
     if not state.get("messages"):
-        context_lines = [
-            f"ID: {c.get('id', '')}\n"
-            f"Name: {c.get('name', '')}\n"
-            f"Subject: {c.get('subject', '')}\n"
-            f"Source: {c.get('document_name', '')}\n"
-            f"Definition: {c.get('definition', '')}"
-            for c in state.get("retrieved_concepts", [])
-        ]
-        context_block = "\n\n".join(context_lines) if context_lines else "No initial context retrieved."
+        context_block = _fmt_graph_context(state.get("graph_context") or {})
 
         messages = [SystemMessage(content=_SYSTEM_PROMPT)]
         for entry in state.get("chat_history", []):
@@ -188,6 +190,39 @@ async def _execute_tool(name: str, args: dict, user_id: str) -> dict:
     return {"text": f"Unknown tool: {name}", "sources": [], "highlighted": []}
 
 
+def _fmt_graph_context(graph: dict) -> str:
+    docs = graph.get("documents", [])
+    concepts = graph.get("concepts", [])
+    rels = graph.get("relationships", [])
+
+    if not docs and not concepts:
+        return "No graph data found for this user."
+
+    lines = []
+    if docs:
+        lines.append("=== Documents ===")
+        for d in docs:
+            lines.append(f"- {d.get('name', d.get('title', 'Unknown'))} (id: {d.get('document_id', '')})")
+
+    if concepts:
+        lines.append("\n=== Concepts ===")
+        for c in concepts:
+            lines.append(
+                f"- [{c.get('name', '')}] subject: {c.get('subject', '')} | "
+                f"source: {c.get('document_name', '')} | def: {c.get('definition', '')}"
+            )
+
+    if rels:
+        lines.append("\n=== Relationships ===")
+        for r in rels:
+            if r.get("from") and r.get("to"):
+                lines.append(
+                    f"- {r['from']} --[{r.get('type', '')}]--> {r['to']} (weight: {r.get('weight', '')})"
+                )
+
+    return "\n".join(lines)
+
+
 def _fmt_concepts(concepts: list[dict]) -> str:
     if not concepts:
         return "No concepts found."
@@ -209,11 +244,19 @@ def _fmt_neighbors(neighbors: list[dict]) -> str:
 
 
 async def save_messages_node(state: ChatState) -> dict:
-    await save_message(state["user_id"], "user", state["message"], [], [])
+    await save_message(
+        state["user_id"],
+        state["chat_session_id"],
+        "user",
+        state["message"],
+        [],
+        [],
+    )
     reply = state["reply"]
     assert reply is not None
     await save_message(
         state["user_id"],
+        state["chat_session_id"],
         "assistant",
         reply,
         state.get("sources", []),

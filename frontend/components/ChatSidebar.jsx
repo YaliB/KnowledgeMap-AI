@@ -1,22 +1,115 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeRaw from 'rehype-raw'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import * as api from '@/lib/api'
 import { subjectToColor } from '@/lib/graphLayout'
 
-export default function ChatSidebar({ onHighlight, subjects = [], onSelectNode }) {
+const MAX_TEXTAREA_HEIGHT = 180
+
+const sanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames || []), 'u'],
+}
+
+const markdownComponents = {
+  p: ({ children }) => <p style={{ margin: '0 0 10px' }}>{children}</p>,
+  strong: ({ children }) => <strong style={{ fontWeight: 700 }}>{children}</strong>,
+  em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
+  u: ({ children }) => <u style={{ textDecorationThickness: '2px' }}>{children}</u>,
+  ul: ({ children }) => (
+    <ul style={{ margin: '0 0 10px', paddingInlineStart: '20px', listStyle: 'disc' }}>{children}</ul>
+  ),
+  ol: ({ children }) => (
+    <ol style={{ margin: '0 0 10px', paddingInlineStart: '20px' }}>{children}</ol>
+  ),
+  li: ({ children }) => <li style={{ marginBottom: '4px' }}>{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote
+      style={{
+        margin: '0 0 10px',
+        padding: '8px 12px',
+        borderLeft: '3px solid var(--accent-blue)',
+        background: 'rgba(255,255,255,0.03)',
+        borderRadius: '0 8px 8px 0',
+      }}
+    >
+      {children}
+    </blockquote>
+  ),
+  code: ({ inline, children }) =>
+    inline ? (
+      <code
+        style={{
+          padding: '2px 5px',
+          borderRadius: '6px',
+          background: 'rgba(255,255,255,0.08)',
+          fontSize: '0.9em',
+        }}
+      >
+        {children}
+      </code>
+    ) : (
+      <pre
+        style={{
+          margin: '0 0 10px',
+          padding: '10px',
+          borderRadius: '10px',
+          overflowX: 'auto',
+          background: 'rgba(0,0,0,0.28)',
+          border: '1px solid var(--border)',
+        }}
+      >
+        <code>{children}</code>
+      </pre>
+    ),
+}
+
+function MarkdownMessage({ content }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[[rehypeRaw], [rehypeSanitize, sanitizeSchema]]}
+      components={markdownComponents}
+    >
+      {content}
+    </ReactMarkdown>
+  )
+}
+
+export default function ChatSidebar({ onHighlight, subjects = [], onSelectNode, width = '460px' }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [resettingSession, setResettingSession] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const activeSessionIdRef = useRef(null)
+
+  const resetLocalChatUi = () => {
+    setMessages([])
+    setInput('')
+    onHighlight([])
+    onSelectNode?.(null)
+  }
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
+  useEffect(() => {
+    const textarea = inputRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${Math.min(textarea.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`
+    textarea.style.overflowY = textarea.scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden'
+  }, [input])
+
   const send = async () => {
     const text = input.trim()
-    if (!text || loading) return
+    if (!text || loading || resettingSession) return
     setMessages((prev) => [...prev, { role: 'user', content: text }])
     setInput('')
     setLoading(true)
@@ -24,14 +117,33 @@ export default function ChatSidebar({ onHighlight, subjects = [], onSelectNode }
 
     try {
       const res = await api.chat({ message: text })
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: res.reply || res.message || '',
-          sources: res.sources || [],
-        },
-      ])
+      const responseSessionId = res.chat_session_id || null
+      const sessionChanged =
+        !!responseSessionId &&
+        !!activeSessionIdRef.current &&
+        responseSessionId !== activeSessionIdRef.current
+
+      activeSessionIdRef.current = responseSessionId || activeSessionIdRef.current
+
+      if (sessionChanged) {
+        setMessages([
+          { role: 'user', content: text },
+          {
+            role: 'assistant',
+            content: res.reply || res.message || '',
+            sources: res.sources || [],
+          },
+        ])
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: res.reply || res.message || '',
+            sources: res.sources || [],
+          },
+        ])
+      }
       onHighlight(res.highlighted_node_ids || [])
     } catch {
       setMessages((prev) => [
@@ -51,10 +163,27 @@ export default function ChatSidebar({ onHighlight, subjects = [], onSelectNode }
     }
   }
 
+  const clearHistory = async () => {
+    if (resettingSession) return
+    setResettingSession(true)
+
+    try {
+      const created = await api.createChatSession()
+      activeSessionIdRef.current = created?.chat_session_id || null
+    } catch {
+      // Even if session creation fails temporarily, clear local UI state.
+      activeSessionIdRef.current = null
+    } finally {
+      resetLocalChatUi()
+      setResettingSession(false)
+      setTimeout(() => inputRef.current?.focus(), 50)
+    }
+  }
+
   return (
     <div
       style={{
-        width: '320px',
+        width,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
@@ -70,22 +199,44 @@ export default function ChatSidebar({ onHighlight, subjects = [], onSelectNode }
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
+          justifyContent: 'space-between',
           flexShrink: 0,
         }}
       >
-        <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: '#43e97b',
-            animation: 'pulse 2s ease-in-out infinite',
-            display: 'inline-block',
-          }}
-        />
-        <span style={{ fontWeight: '600', fontSize: '14px', color: 'var(--text-primary)' }}>
-          Ask KnowledgeMap
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: '#43e97b',
+              animation: 'pulse 2s ease-in-out infinite',
+              display: 'inline-block',
+            }}
+          />
+          <span style={{ fontWeight: '600', fontSize: '14px', color: 'var(--text-primary)' }}>
+            Ask KnowledgeMap
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            onClick={clearHistory}
+            type="button"
+            disabled={resettingSession || loading}
+            style={{
+              border: '1px solid var(--border)',
+              background:
+                resettingSession || loading ? 'var(--bg-surface)' : 'rgba(255,107,107,0.12)',
+              color: resettingSession || loading ? 'var(--text-muted)' : '#ff8f8f',
+              borderRadius: '8px',
+              padding: '5px 9px',
+              fontSize: '12px',
+              cursor: resettingSession || loading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {resettingSession ? 'Resetting...' : 'Clear'}
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -128,7 +279,7 @@ export default function ChatSidebar({ onHighlight, subjects = [], onSelectNode }
                   lineHeight: '1.5',
                 }}
               >
-                {msg.content}
+                <MarkdownMessage content={msg.content} />
               </div>
             </div>
           ) : (
@@ -143,10 +294,9 @@ export default function ChatSidebar({ onHighlight, subjects = [], onSelectNode }
                   color: 'var(--text-primary)',
                   fontSize: '13px',
                   lineHeight: '1.6',
-                  whiteSpace: 'pre-wrap',
                 }}
               >
-                {msg.content}
+                <MarkdownMessage content={msg.content} />
               </div>
               {msg.sources && msg.sources.length > 0 && (
                 <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -239,7 +389,7 @@ export default function ChatSidebar({ onHighlight, subjects = [], onSelectNode }
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={loading}
+          disabled={loading || resettingSession}
           placeholder="Ask about your knowledge graph…"
           rows={1}
           style={{
@@ -254,21 +404,24 @@ export default function ChatSidebar({ onHighlight, subjects = [], onSelectNode }
             outline: 'none',
             fontFamily: 'inherit',
             lineHeight: '1.4',
-            maxHeight: '120px',
-            overflowY: 'auto',
+            minHeight: '42px',
+            maxHeight: `${MAX_TEXTAREA_HEIGHT}px`,
+            overflowY: 'hidden',
           }}
         />
         <button
           onClick={send}
-          disabled={loading || !input.trim()}
+          disabled={loading || resettingSession || !input.trim()}
           style={{
             padding: '10px 14px',
             background:
-              loading || !input.trim() ? 'rgba(76,201,240,0.3)' : 'var(--accent-blue)',
+              loading || resettingSession || !input.trim()
+                ? 'rgba(76,201,240,0.3)'
+                : 'var(--accent-blue)',
             color: '#07090f',
             border: 'none',
             borderRadius: '8px',
-            cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+            cursor: loading || resettingSession || !input.trim() ? 'not-allowed' : 'pointer',
             fontWeight: '600',
             fontSize: '13px',
             flexShrink: 0,

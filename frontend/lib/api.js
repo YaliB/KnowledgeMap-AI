@@ -51,6 +51,8 @@ export const getGraph = () => req('/graph')
 export const getConcept = (id) => req(`/concept/${id}`)
 
 // Chat
+export const createChatSession = () => req('/chat/session/new', { method: 'POST' })
+
 export const chat = (body) =>
   req('/chat', {
     method: 'POST',

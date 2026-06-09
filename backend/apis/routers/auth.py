@@ -39,4 +39,5 @@ async def logout(
     if session_id:
         await auth_service.logout(session_id)
     response.delete_cookie("session_id")
+    response.delete_cookie("chat_session_id")
     return {"message": "logged out"}
