@@ -56,7 +56,7 @@ jobs:
 
   build-and-push-backend:
     needs: integration-testing
-    if: github.ref == 'refs/heads/ci-deployment' || github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/ci-deployment' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     outputs:
       ecr-registry: ${{ steps.login-ecr.outputs.registry }}
@@ -89,7 +89,7 @@ jobs:
 
   build-and-push-frontend:
     needs: integration-testing
-    if: github.ref == 'refs/heads/ci-deployment' || github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/ci-deployment' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     steps:
     - name: Checkout Code Base
@@ -121,7 +121,7 @@ jobs:
 
   deploy-backend:
     needs: build-and-push-backend
-    if: github.ref == 'refs/heads/ci-deployment' || github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/ci-deployment' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     steps:
     - name: Configure AWS Credentials
@@ -140,7 +140,7 @@ jobs:
 
   deploy-frontend:
     needs: build-and-push-frontend
-    if: github.ref == 'refs/heads/ci-deployment' || github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/ci-deployment' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     steps:
     - name: Configure AWS Credentials
