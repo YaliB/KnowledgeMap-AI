@@ -134,7 +134,7 @@ jobs:
     - name: Deploy Backend to ECS
       run: |
         aws ecs update-service \
-          --cluster knowledgemap \
+          --cluster knowledgemap-1 \
           --service knowledgemap-backend \
           --force-new-deployment
 
@@ -153,6 +153,6 @@ jobs:
     - name: Deploy Frontend to ECS
       run: |
         aws ecs update-service \
-          --cluster knowledgemap \
+          --cluster knowledgemap-1 \
           --service knowledgemap-frontend \
           --force-new-deployment
